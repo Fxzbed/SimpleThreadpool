@@ -1,56 +1,42 @@
-#include "include/threadPool.hpp"
-
-threadPool::threadPool(int threadNum) : threadList(threadNum), runningStatus(true) {
-    initThreadpool();
-}
+#include "/root/CodeWSL/threadPool/include/threadPool.hpp"
 
 void threadPool::initThreadpool() {
-    for (auto &thread : this->threadList) {
-        auto workFuncinit = [this] () {
-            while (this->runningStatus) {
-                taskType taskFunc;
-                bool isSussess = false;
-                {
-                    std::unique_lock<std::mutex> lockerUni(this->poolLock);
-
-                    if (this->taskQueue.empty()) {
-                        this->cV.wait(lockerUni);
-                    }
-                    isSussess = this->taskQueue.pop(taskFunc);
+    for (int i = 0; i < this->threadList.size(); i++) {
+        auto workTask = [this, i]() {
+            while (runningStatus) {
+                bool isSuccess = false;
+                taskType workFunc;
+                if (taskQueue.empty()) {
+                    std::unique_lock<std::mutex> lockerInitFunc(poolLock);
+                    cV.wait(lockerInitFunc);
+                }
+                else {
+                    isSuccess = taskQueue.pop(workFunc);
+                }
+                if (isSuccess) {
+                    workFunc();
                 }
             }
         };
-
-        thread = std::thread(workFuncinit);
+        threadList[i] = std::thread(workTask);
     }
-
 }
-template<typename Func, typename ...Args>
-auto threadPool::submitTask(Func&& funcReturn, Args... argSend) -> std::future<decltype(funcReturn(argSend...))> {
-    using returnType = typename std::invoke_result<Func, Args ...>::type;
-    std::function<returnType()> taskTrans1 = std::bind(std::forward<func>(funcReturn), std::forward<Args>(argSend) ...);
 
-    auto taskTrans2 = std::make_shared<std::packaged_task<returnType()>> (taskTrans1);
-
-    auto taskTrans3 = [taskTrans2] () {
-        (*taskTrans2)();
-    };
-
-    this->taskQueue.push(taskTrans3);
-    this->cV.notify_one();
-
-    return taskTrans2->get_future();
-
+threadPool::threadPool(int threadNum) {
+    this->runningStatus = true; this->threadList.resize(threadNum);
+    this->printMutex("[ThreadPool]: ThreadPool init!\n");
+    this->initThreadpool();
 }
+
 
 threadPool::~threadPool() {
     this->runningStatus = false;
-
     this->cV.notify_all();
-
-    for (auto &thread : threadList) {
-        if (thread.joinable()) {
-            thread.join();
+    printMutex("[ThreadPool]: Every threads joining!\n");
+    for (auto& thread_ : this->threadList) {
+        if (thread_.joinable()) {
+            thread_.join();
         }
     }
+    printMutex("[ThreadPool]: ThreadPool shut down!\n");
 }
